@@ -7,11 +7,21 @@ import json
 import os
 import numpy as np
 import sqlite3
-import paramiko
 import threading
 import time
+import socket
+import re
 from datetime import datetime, timedelta
 from contextlib import redirect_stdout, redirect_stderr
+
+# 尝试导入paramiko，如果没有安装则提示
+try:
+    import paramiko
+    PARAMIKO_AVAILABLE = True
+except ImportError:
+    PARAMIKO_AVAILABLE = False
+    print("⚠️  警告: paramiko库未安装，SSH连接功能将被禁用")
+    print("   安装命令: pip install paramiko")
 
 app = Flask(__name__)
 CORS(app)
@@ -345,35 +355,277 @@ class ServerMonitor:
     def test_connection(self, server_config):
         """测试服务器连接"""
         try:
-            if server_config['host'] == 'localhost':
-                # 本地服务器模拟
-                return True, "连接成功"
+            host = server_config['host']
+            port = server_config['port']
+            username = server_config['username']
+            auth_type = server_config.get('auth_type', 'password')
 
-            # 实际SSH连接测试（需要paramiko库）
-            # ssh = paramiko.SSHClient()
-            # ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            # ssh.connect(
-            #     hostname=server_config['host'],
-            #     port=server_config['port'],
-            #     username=server_config['username'],
-            #     password=server_config.get('password'),
-            #     key_filename=server_config.get('private_key_path'),
-            #     timeout=10
-            # )
-            # ssh.close()
+            # 本地服务器特殊处理
+            if host in ['localhost', '127.0.0.1']:
+                return True, "本地服务器连接成功"
 
-            # 模拟连接测试
-            return True, "连接成功"
+            # 检查paramiko是否可用
+            if not PARAMIKO_AVAILABLE:
+                return False, "SSH连接功能不可用，请安装paramiko库: pip install paramiko"
+
+            # 创建SSH客户端
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            # 根据认证方式连接
+            if auth_type == 'password':
+                password = server_config.get('password')
+                if not password:
+                    return False, "密码认证需要提供密码"
+
+                ssh.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                    timeout=10
+                )
+            elif auth_type == 'key':
+                private_key_path = server_config.get('private_key_path')
+                key_password = server_config.get('key_password')
+
+                if not private_key_path:
+                    return False, "密钥认证需要提供私钥文件路径"
+
+                # 尝试加载私钥
+                try:
+                    if private_key_path.endswith('.pem') or 'rsa' in private_key_path.lower():
+                        private_key = paramiko.RSAKey.from_private_key_file(private_key_path, password=key_password)
+                    else:
+                        # 尝试自动检测密钥类型
+                        private_key = paramiko.RSAKey.from_private_key_file(private_key_path, password=key_password)
+                except:
+                    try:
+                        private_key = paramiko.Ed25519Key.from_private_key_file(private_key_path, password=key_password)
+                    except:
+                        return False, f"无法加载私钥文件: {private_key_path}"
+
+                ssh.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    pkey=private_key,
+                    timeout=10
+                )
+            else:
+                return False, f"不支持的认证方式: {auth_type}"
+
+            # 测试执行简单命令
+            stdin, stdout, stderr = ssh.exec_command('echo "connection test"')
+            result = stdout.read().decode().strip()
+
+            ssh.close()
+
+            if result == "connection test":
+                return True, "SSH连接测试成功"
+            else:
+                return False, "SSH连接成功但命令执行失败"
+
+        except paramiko.AuthenticationException:
+            return False, "SSH认证失败，请检查用户名和密码/密钥"
+        except paramiko.SSHException as e:
+            return False, f"SSH连接错误: {str(e)}"
+        except socket.timeout:
+            return False, "连接超时，请检查主机地址和端口"
+        except socket.gaierror:
+            return False, "无法解析主机名，请检查主机地址"
+        except Exception as e:
+            return False, f"连接失败: {str(e)}"
+
+    def get_real_server_metrics(self, server_config):
+        """获取真实服务器监控数据"""
+        if not PARAMIKO_AVAILABLE:
+            return None
+
+        try:
+            host = server_config['host']
+            port = server_config['port']
+            username = server_config['username']
+            auth_type = server_config.get('auth_type', 'password')
+
+            # 本地服务器使用psutil
+            if host in ['localhost', '127.0.0.1']:
+                return self._get_local_metrics()
+
+            # 远程服务器使用SSH
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            # 连接服务器
+            if auth_type == 'password':
+                ssh.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    password=server_config.get('password'),
+                    timeout=10
+                )
+            else:  # key认证
+                private_key_path = server_config.get('private_key_path')
+                key_password = server_config.get('key_password')
+
+                try:
+                    private_key = paramiko.RSAKey.from_private_key_file(private_key_path, password=key_password)
+                except:
+                    private_key = paramiko.Ed25519Key.from_private_key_file(private_key_path, password=key_password)
+
+                ssh.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    pkey=private_key,
+                    timeout=10
+                )
+
+            # 获取系统信息
+            metrics = {}
+
+            # CPU信息
+            stdin, stdout, stderr = ssh.exec_command("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1")
+            cpu_usage = stdout.read().decode().strip()
+            try:
+                metrics['cpu'] = float(cpu_usage)
+            except:
+                metrics['cpu'] = 0.0
+
+            # 负载平均值
+            stdin, stdout, stderr = ssh.exec_command("uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ','")
+            load_avg = stdout.read().decode().strip()
+            try:
+                metrics['load_avg'] = float(load_avg)
+            except:
+                metrics['load_avg'] = 0.0
+
+            # 内存信息
+            stdin, stdout, stderr = ssh.exec_command("free | grep Mem | awk '{printf \"%.1f %.1f\", $3/$2*100, $2/1024/1024}'")
+            memory_info = stdout.read().decode().strip().split()
+            try:
+                metrics['memory_percent'] = float(memory_info[0])
+                metrics['memory_total'] = float(memory_info[1])
+                metrics['memory_used'] = metrics['memory_total'] * metrics['memory_percent'] / 100
+            except:
+                metrics['memory_percent'] = 0.0
+                metrics['memory_total'] = 0.0
+                metrics['memory_used'] = 0.0
+
+            # 磁盘信息
+            stdin, stdout, stderr = ssh.exec_command("df -h / | tail -1 | awk '{print $5}' | tr -d '%'")
+            disk_usage = stdout.read().decode().strip()
+            try:
+                metrics['disk_percent'] = float(disk_usage)
+            except:
+                metrics['disk_percent'] = 0.0
+
+            stdin, stdout, stderr = ssh.exec_command("df -BG / | tail -1 | awk '{print $4}' | tr -d 'G'")
+            disk_free = stdout.read().decode().strip()
+            try:
+                metrics['disk_free'] = float(disk_free)
+            except:
+                metrics['disk_free'] = 0.0
+
+            # 网络信息（简化版）
+            stdin, stdout, stderr = ssh.exec_command("cat /proc/net/dev | grep -E '(eth0|ens|enp)' | head -1 | awk '{print $2, $10}'")
+            network_info = stdout.read().decode().strip().split()
+            try:
+                metrics['network_recv'] = int(network_info[0]) if len(network_info) > 0 else 0
+                metrics['network_sent'] = int(network_info[1]) if len(network_info) > 1 else 0
+            except:
+                metrics['network_recv'] = 0
+                metrics['network_sent'] = 0
+
+            ssh.close()
+            return metrics
 
         except Exception as e:
-            return False, str(e)
+            print(f"获取服务器监控数据失败: {e}")
+            return None
+
+    def _get_local_metrics(self):
+        """获取本地服务器监控数据"""
+        try:
+            import psutil
+
+            metrics = {}
+
+            # CPU信息
+            metrics['cpu'] = psutil.cpu_percent(interval=1)
+            metrics['load_avg'] = psutil.getloadavg()[0] if hasattr(psutil, 'getloadavg') else 0.0
+
+            # 内存信息
+            memory = psutil.virtual_memory()
+            metrics['memory_percent'] = memory.percent
+            metrics['memory_total'] = memory.total / (1024**3)  # GB
+            metrics['memory_used'] = memory.used / (1024**3)    # GB
+
+            # 磁盘信息
+            disk = psutil.disk_usage('/')
+            metrics['disk_percent'] = disk.percent
+            metrics['disk_free'] = disk.free / (1024**3)  # GB
+
+            # 网络信息
+            network = psutil.net_io_counters()
+            metrics['network_recv'] = network.bytes_recv
+            metrics['network_sent'] = network.bytes_sent
+
+            return metrics
+
+        except ImportError:
+            print("psutil库未安装，无法获取本地监控数据")
+            return None
+        except Exception as e:
+            print(f"获取本地监控数据失败: {e}")
+            return None
 
     def get_server_metrics(self, server_id, time_range='1h'):
         """获取服务器监控数据"""
         if server_id not in self.servers:
             return None
 
-        # 生成模拟数据
+        server_config = self.servers[server_id]
+
+        # 尝试获取真实数据
+        real_metrics = self.get_real_server_metrics(server_config)
+
+        if real_metrics:
+            # 使用真实数据
+            current_metrics = real_metrics
+        else:
+            # 回退到模拟数据
+            current_metrics = self._generate_mock_current_metrics()
+
+        # 生成历史数据（模拟）
+        historical_data = self._generate_historical_data(time_range, current_metrics)
+
+        # 生成进程数据
+        processes = self._generate_mock_processes()
+
+        return {
+            'current': current_metrics,
+            'historical': historical_data,
+            'processes': processes
+        }
+
+    def _generate_mock_current_metrics(self):
+        """生成模拟的当前指标"""
+        return {
+            'cpu': round(np.random.uniform(20, 80), 1),
+            'load_avg': round(np.random.uniform(0.5, 3.0), 2),
+            'memory_percent': round(np.random.uniform(40, 85), 1),
+            'memory_used': round(np.random.uniform(3, 7), 1),
+            'memory_total': 8.0,
+            'disk_percent': round(np.random.uniform(30, 70), 1),
+            'disk_free': round(np.random.uniform(50, 200), 1),
+            'network_sent': int(np.random.uniform(1024*100, 1024*1000)),
+            'network_recv': int(np.random.uniform(1024*150, 1024*1500))
+        }
+
+    def _generate_historical_data(self, time_range, current_metrics):
+        """生成历史数据"""
         current_time = datetime.now()
 
         # 解析时间范围
@@ -407,16 +659,20 @@ class ServerMonitor:
 
         points = duration_minutes * 60 // interval_seconds
 
+        # 基于当前指标生成历史数据
+        base_cpu = current_metrics.get('cpu', 50)
+        base_memory = current_metrics.get('memory_percent', 60)
+
         for i in range(points):
             timestamp = current_time - timedelta(seconds=(points - i - 1) * interval_seconds)
             timestamps.append(timestamp.strftime('%H:%M:%S'))
 
-            # 生成模拟数据（带一些波动）
-            base_cpu = 30 + 20 * np.sin(i * 0.1) + np.random.normal(0, 5)
-            cpu_data.append(max(0, min(100, base_cpu)))
+            # 基于当前值生成历史数据（带波动）
+            cpu_val = base_cpu + 10 * np.sin(i * 0.1) + np.random.normal(0, 5)
+            cpu_data.append(max(0, min(100, cpu_val)))
 
-            base_memory = 60 + 10 * np.sin(i * 0.05) + np.random.normal(0, 3)
-            memory_data.append(max(0, min(100, base_memory)))
+            memory_val = base_memory + 5 * np.sin(i * 0.05) + np.random.normal(0, 3)
+            memory_data.append(max(0, min(100, memory_val)))
 
             disk_read_data.append(max(0, 1024 * 1024 * (5 + np.random.normal(0, 2))))
             disk_write_data.append(max(0, 1024 * 1024 * (3 + np.random.normal(0, 1))))
@@ -424,21 +680,8 @@ class ServerMonitor:
             network_sent_data.append(max(0, 1024 * (100 + np.random.normal(0, 20))))
             network_recv_data.append(max(0, 1024 * (150 + np.random.normal(0, 30))))
 
-        # 当前指标
-        current_metrics = {
-            'cpu': round(cpu_data[-1], 1) if cpu_data else 0,
-            'load_avg': round(cpu_data[-1] / 100 * 4, 2) if cpu_data else 0,
-            'memory_percent': round(memory_data[-1], 1) if memory_data else 0,
-            'memory_used': round(memory_data[-1] / 100 * 8, 1) if memory_data else 0,
-            'memory_total': 8.0,
-            'disk_percent': round(np.random.uniform(40, 60), 1),
-            'disk_free': round(np.random.uniform(100, 200), 1),
-            'network_sent': int(network_sent_data[-1]) if network_sent_data else 0,
-            'network_recv': int(network_recv_data[-1]) if network_recv_data else 0
-        }
-
         # 历史数据
-        historical_data = {
+        return {
             'timestamps': timestamps,
             'cpu': [round(x, 1) for x in cpu_data],
             'memory': [round(x, 1) for x in memory_data],
@@ -446,15 +689,6 @@ class ServerMonitor:
             'disk_write': [int(x) for x in disk_write_data],
             'network_sent': [int(x) for x in network_sent_data],
             'network_recv': [int(x) for x in network_recv_data]
-        }
-
-        # 进程数据
-        processes = self._generate_mock_processes()
-
-        return {
-            'current': current_metrics,
-            'historical': historical_data,
-            'processes': processes
         }
 
     def _generate_mock_processes(self):

@@ -37,14 +37,22 @@ def test_get_servers():
 def test_add_server():
     """测试添加服务器"""
     print("\n➕ 测试添加服务器...")
-    
+
+    # 提示用户输入真实服务器信息
+    print("请输入真实服务器信息进行测试（按回车使用默认值）:")
+
+    host = input("服务器地址 [192.168.1.100]: ").strip() or "192.168.1.100"
+    port = input("SSH端口 [22]: ").strip() or "22"
+    username = input("用户名 [root]: ").strip() or "root"
+    password = input("密码: ").strip()
+
     server_config = {
-        'name': '测试服务器',
-        'host': '192.168.1.100',
-        'port': 22,
-        'username': 'admin',
+        'name': f'测试服务器-{host}',
+        'host': host,
+        'port': int(port),
+        'username': username,
         'auth_type': 'password',
-        'password': 'test123',
+        'password': password,
         'monitor_interval': 30,
         'description': '这是一个测试服务器',
         'enabled': True
@@ -262,16 +270,63 @@ def format_bytes(bytes_value):
     
     return f"{size:.1f} {units[unit_index]}"
 
+def interactive_test():
+    """交互式测试"""
+    print("🚀 服务器监控API交互式测试")
+    print("=" * 60)
+
+    while True:
+        print("\n📋 请选择测试项目:")
+        print("1. 获取服务器列表")
+        print("2. 添加真实服务器")
+        print("3. 测试服务器连接")
+        print("4. 获取监控数据")
+        print("5. 获取实时数据")
+        print("6. 获取进程列表")
+        print("7. 运行完整测试")
+        print("0. 退出")
+
+        choice = input("\n请输入选项 (0-7): ").strip()
+
+        if choice == '0':
+            print("👋 测试结束")
+            break
+        elif choice == '1':
+            test_get_servers()
+        elif choice == '2':
+            test_add_server()
+        elif choice == '3':
+            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
+            test_connection(server_id)
+        elif choice == '4':
+            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
+            time_range = input("请输入时间范围 [1h]: ").strip() or "1h"
+            test_get_metrics(server_id, time_range)
+        elif choice == '5':
+            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
+            test_realtime_metrics(server_id)
+        elif choice == '6':
+            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
+            limit = input("请输入进程数量限制 [5]: ").strip() or "5"
+            test_processes(server_id, int(limit))
+        elif choice == '7':
+            main()
+        else:
+            print("❌ 无效选项，请重新选择")
+
 def main():
     """主测试函数"""
-    print("🚀 开始测试服务器监控API...")
+    print("🚀 开始完整测试服务器监控API...")
     print("=" * 60)
-    
+
     # 1. 测试获取服务器列表
     servers = test_get_servers()
-    
-    # 2. 测试添加服务器
-    new_server_id = test_add_server()
+
+    # 2. 询问是否添加真实服务器
+    add_real = input("\n是否添加真实服务器进行测试? (y/N): ").strip().lower()
+    new_server_id = None
+    if add_real == 'y':
+        new_server_id = test_add_server()
     
     # 3. 使用演示服务器进行测试
     demo_server_id = 'demo-server'
@@ -298,4 +353,18 @@ def main():
     print("✨ 服务器监控API测试完成!")
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == '--interactive':
+        interactive_test()
+    else:
+        print("💡 使用提示:")
+        print("   python test_server_monitor_api.py           # 运行完整测试")
+        print("   python test_server_monitor_api.py --interactive  # 交互式测试")
+        print()
+
+        mode = input("选择测试模式 (1=完整测试, 2=交互式): ").strip()
+        if mode == '2':
+            interactive_test()
+        else:
+            main()
