@@ -1,0 +1,67 @@
+// Ant Design Pro 风格配色方案
+// 主色调 - 蓝色系
+$primary-main: #1890ff;
+$primary-light: #40a9ff;
+$primary-dark: #096dd9;
+$primary-hover: #40a9ff;
+$primary-active: #096dd9;
+
+// 辅助色
+$secondary-main: #722ed1;
+$secondary-light: #9254de;
+$secondary-dark: #531dab;
+
+$success-color: #52c41a;
+$warning-color: #faad14;
+$error-color: #ff4d4f;
+
+// 背景色 - Ant Design Pro 风格
+$bg-default: #f0f2f5;
+$bg-paper: #ffffff;
+$bg-primary: #fafafa;
+$bg-secondary: #f5f5f5;
+$bg-mask: rgba(0, 0, 0, 0.45);
+
+// 文字颜色 - Ant Design Pro 风格
+$text-primary: rgba(0, 0, 0, 0.85);
+$text-regular: rgba(0, 0, 0, 0.65);
+$text-secondary: rgba(0, 0, 0, 0.45);
+$text-placeholder: rgba(0, 0, 0, 0.25);
+$text-disabled: rgba(0, 0, 0, 0.25);
+
+// 边框和分割线 - Ant Design Pro 风格
+$divider: #f0f0f0;
+$border-color: #d9d9d9;
+$border-light: #f0f0f0;
+
+// 阴影系统 - Ant Design Pro 风格
+$shadow-1: 0 2px 8px rgba(0, 0, 0, 0.15);
+$shadow-2: 0 4px 12px rgba(0, 0, 0, 0.15);
+$shadow-3: 0 6px 16px rgba(0, 0, 0, 0.15);
+$shadow-4: 0 9px 28px 8px rgba(0, 0, 0, 0.05), 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 6px -4px rgba(0, 0, 0, 0.12);
+
+// sidebar - Ant Design Pro 风格
+$menuText: rgba(255, 255, 255, 0.65);
+$menuActiveText: #ffffff;
+$subMenuActiveText: #1890ff;
+
+$menuBg: #001529;
+$menuHover: rgba(255, 255, 255, 0.08);
+
+$subMenuBg: #000c17;
+$subMenuHover: rgba(255, 255, 255, 0.08);
+
+$sideBarWidth: 160px;
+
+// the :export directive is the magic sauce for webpack
+// https://www.bluematador.com/blog/how-to-share-variables-between-js-and-sass
+:export {
+  menuText: $menuText;
+  menuActiveText: $menuActiveText;
+  subMenuActiveText: $subMenuActiveText;
+  menuBg: $menuBg;
+  menuHover: $menuHover;
+  subMenuBg: $subMenuBg;
+  subMenuHover: $subMenuHover;
+  sideBarWidth: $sideBarWidth;
+}
