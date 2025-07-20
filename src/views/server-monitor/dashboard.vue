@@ -219,9 +219,29 @@
     <div v-if="!selectedServer" class="no-server-selected">
       <div class="empty-state">
         <i class="el-icon-monitor"></i>
-        <h3>请选择要监控的服务器</h3>
-        <p>点击上方"配置服务器"按钮添加服务器</p>
-        <el-button type="primary" @click="showServerConfig = true">配置服务器</el-button>
+        <h3>欢迎使用服务器监控系统</h3>
+        <p>请先配置要监控的服务器</p>
+        <div class="setup-steps">
+          <div class="step">
+            <span class="step-number">1</span>
+            <span class="step-text">点击"配置服务器"按钮</span>
+          </div>
+          <div class="step">
+            <span class="step-number">2</span>
+            <span class="step-text">填写服务器连接信息</span>
+          </div>
+          <div class="step">
+            <span class="step-number">3</span>
+            <span class="step-text">测试连接并保存配置</span>
+          </div>
+          <div class="step">
+            <span class="step-number">4</span>
+            <span class="step-text">选择服务器开始监控</span>
+          </div>
+        </div>
+        <el-button type="primary" size="large" @click="showServerConfig = true">
+          <i class="el-icon-plus"></i> 配置第一台服务器
+        </el-button>
       </div>
     </div>
 
@@ -230,9 +250,27 @@
       <div class="error-state">
         <i class="el-icon-warning"></i>
         <h3>无法连接到服务器</h3>
-        <p>请检查服务器配置和网络连接</p>
-        <el-button @click="testConnection">重新连接</el-button>
-        <el-button type="primary" @click="editCurrentServer">编辑配置</el-button>
+        <p>{{ currentServerInfo.name }} ({{ currentServerInfo.host }})</p>
+        <div class="error-details">
+          <p>可能的原因：</p>
+          <ul>
+            <li>服务器未启动或网络不通</li>
+            <li>SSH服务未运行或端口被阻拦</li>
+            <li>用户名或密码错误</li>
+            <li>防火墙阻止连接</li>
+          </ul>
+        </div>
+        <div class="error-actions">
+          <el-button @click="testConnection" :loading="loading">
+            <i class="el-icon-refresh"></i> 重新连接
+          </el-button>
+          <el-button type="primary" @click="editCurrentServer">
+            <i class="el-icon-edit"></i> 编辑配置
+          </el-button>
+          <el-button @click="loadServerData">
+            <i class="el-icon-connection"></i> 获取数据
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -320,11 +358,10 @@ export default {
       try {
         const response = await getServers()
         this.servers = response.data || []
-        
-        // 如果有服务器且没有选中的，自动选择第一个
-        if (this.servers.length > 0 && !this.selectedServer) {
-          this.selectedServer = this.servers[0].id
-          this.onServerChange()
+
+        // 不自动选择服务器，让用户手动选择
+        if (this.servers.length === 0) {
+          this.$message.info('暂无配置的服务器，请先添加服务器配置')
         }
       } catch (error) {
         this.$message.error('加载服务器列表失败: ' + error.message)
@@ -366,23 +403,43 @@ export default {
     },
 
     async loadServerData() {
-      if (!this.selectedServer || this.connectionStatus !== 'connected') return
-      
+      if (!this.selectedServer) return
+
       this.loading = true
       try {
         const response = await getServerMetrics(this.selectedServer, this.timeRange)
-        
+
         if (response.success) {
           this.currentMetrics = response.data.current
           this.historicalData = response.data.historical
           this.topProcesses = response.data.processes || []
-          
+
           // 更新图表
           this.updateCharts()
+
+          // 确保连接状态为已连接
+          if (this.connectionStatus !== 'connected') {
+            this.connectionStatus = 'connected'
+          }
         } else {
+          // 数据获取失败，可能是连接问题
+          this.connectionStatus = 'disconnected'
           this.$message.error('获取服务器数据失败: ' + response.error)
+
+          if (response.suggestion) {
+            this.$message.info(response.suggestion)
+          }
+
+          // 清空数据
+          this.currentMetrics = {
+            cpu: 0, load_avg: 0, memory_percent: 0, memory_used: 0, memory_total: 0,
+            disk_percent: 0, disk_free: 0, network_sent: 0, network_recv: 0
+          }
+          this.historicalData = { timestamps: [], cpu: [], memory: [], disk_read: [], disk_write: [], network_sent: [], network_recv: [] }
+          this.topProcesses = []
         }
       } catch (error) {
+        this.connectionStatus = 'disconnected'
         this.$message.error('获取服务器数据失败: ' + error.message)
       } finally {
         this.loading = false
@@ -888,6 +945,74 @@ export default {
 .empty-state p,
 .error-state p {
   margin: 0 0 20px 0;
+}
+
+.setup-steps {
+  margin: 30px 0;
+  text-align: left;
+  max-width: 400px;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: #262c36;
+  border-radius: 6px;
+  border-left: 3px solid #52c41a;
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #52c41a;
+  color: #ffffff;
+  border-radius: 50%;
+  font-weight: bold;
+  font-size: 12px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.step-text {
+  color: #d9d9d9;
+  font-size: 14px;
+}
+
+.error-details {
+  text-align: left;
+  margin: 20px 0;
+  padding: 15px;
+  background: #262c36;
+  border-radius: 6px;
+  border-left: 3px solid #f5222d;
+}
+
+.error-details p {
+  margin: 0 0 10px 0;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.error-details ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #8c8c8c;
+}
+
+.error-details li {
+  margin-bottom: 5px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 /* Element UI 样式覆盖 */

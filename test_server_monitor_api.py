@@ -296,19 +296,44 @@ def interactive_test():
         elif choice == '2':
             test_add_server()
         elif choice == '3':
-            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
-            test_connection(server_id)
+            # 获取可用的服务器列表
+            servers = test_get_servers()
+            if servers:
+                default_id = servers[0]['id']
+                server_id = input(f"请输入服务器ID [{default_id}]: ").strip() or default_id
+            else:
+                server_id = input("请输入服务器ID: ").strip()
+            if server_id:
+                test_connection(server_id)
         elif choice == '4':
-            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
-            time_range = input("请输入时间范围 [1h]: ").strip() or "1h"
-            test_get_metrics(server_id, time_range)
+            servers = test_get_servers()
+            if servers:
+                default_id = servers[0]['id']
+                server_id = input(f"请输入服务器ID [{default_id}]: ").strip() or default_id
+            else:
+                server_id = input("请输入服务器ID: ").strip()
+            if server_id:
+                time_range = input("请输入时间范围 [1h]: ").strip() or "1h"
+                test_get_metrics(server_id, time_range)
         elif choice == '5':
-            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
-            test_realtime_metrics(server_id)
+            servers = test_get_servers()
+            if servers:
+                default_id = servers[0]['id']
+                server_id = input(f"请输入服务器ID [{default_id}]: ").strip() or default_id
+            else:
+                server_id = input("请输入服务器ID: ").strip()
+            if server_id:
+                test_realtime_metrics(server_id)
         elif choice == '6':
-            server_id = input("请输入服务器ID [demo-server]: ").strip() or "demo-server"
-            limit = input("请输入进程数量限制 [5]: ").strip() or "5"
-            test_processes(server_id, int(limit))
+            servers = test_get_servers()
+            if servers:
+                default_id = servers[0]['id']
+                server_id = input(f"请输入服务器ID [{default_id}]: ").strip() or default_id
+            else:
+                server_id = input("请输入服务器ID: ").strip()
+            if server_id:
+                limit = input("请输入进程数量限制 [5]: ").strip() or "5"
+                test_processes(server_id, int(limit))
         elif choice == '7':
             main()
         else:
@@ -328,20 +353,25 @@ def main():
     if add_real == 'y':
         new_server_id = test_add_server()
     
-    # 3. 使用演示服务器进行测试
-    demo_server_id = 'demo-server'
-    
-    # 4. 测试连接
-    test_connection(demo_server_id)
-    
-    # 5. 测试获取监控数据
-    test_get_metrics(demo_server_id, '1h')
-    
-    # 6. 测试获取实时数据
-    test_realtime_metrics(demo_server_id)
-    
-    # 7. 测试获取进程列表
-    test_processes(demo_server_id, 5)
+    # 3. 如果有服务器，测试第一个服务器
+    if servers:
+        test_server_id = servers[0]['id']
+        print(f"\n🔍 使用服务器进行测试: {servers[0]['name']}")
+
+        # 4. 测试连接
+        test_connection(test_server_id)
+
+        # 5. 测试获取监控数据
+        test_get_metrics(test_server_id, '1h')
+
+        # 6. 测试获取实时数据
+        test_realtime_metrics(test_server_id)
+
+        # 7. 测试获取进程列表
+        test_processes(test_server_id, 5)
+    else:
+        print("\n⚠️  没有配置的服务器，跳过监控数据测试")
+        print("   请先添加服务器配置后再进行测试")
     
     # 8. 如果添加了新服务器，测试更新和删除
     if new_server_id:

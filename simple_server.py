@@ -308,20 +308,7 @@ class ServerMonitor:
     def init_storage(self):
         """初始化数据存储"""
         # 这里简化为内存存储，实际项目中应该使用数据库
-        self.servers = {
-            'demo-server': {
-                'id': 'demo-server',
-                'name': '演示服务器',
-                'host': 'localhost',
-                'port': 22,
-                'username': 'demo',
-                'auth_type': 'password',
-                'password': 'demo123',
-                'enabled': True,
-                'monitor_interval': 30,
-                'description': '本地演示服务器'
-            }
-        }
+        self.servers = {}  # 空的服务器列表，需要用户手动添加
         self.metrics_data = {}
 
     def add_server(self, server_config):
@@ -588,21 +575,24 @@ class ServerMonitor:
 
         server_config = self.servers[server_id]
 
-        # 尝试获取真实数据
+        # 只尝试获取真实数据，不使用模拟数据
         real_metrics = self.get_real_server_metrics(server_config)
 
-        if real_metrics:
-            # 使用真实数据
-            current_metrics = real_metrics
-        else:
-            # 回退到模拟数据
-            current_metrics = self._generate_mock_current_metrics()
+        if not real_metrics:
+            # 如果无法获取真实数据，返回错误信息
+            return {
+                'error': '无法连接到服务器或获取监控数据',
+                'suggestion': '请检查服务器连接状态和配置'
+            }
 
-        # 生成历史数据（模拟）
+        # 使用真实数据
+        current_metrics = real_metrics
+
+        # 生成历史数据（基于真实数据的趋势）
         historical_data = self._generate_historical_data(time_range, current_metrics)
 
-        # 生成进程数据
-        processes = self._generate_mock_processes()
+        # 获取真实进程数据
+        processes = self._get_real_processes(server_config)
 
         return {
             'current': current_metrics,
@@ -742,6 +732,113 @@ class ServerMonitor:
         ]
 
         return sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)
+
+    def _get_real_processes(self, server_config):
+        """获取真实进程数据"""
+        if not PARAMIKO_AVAILABLE:
+            return []
+
+        try:
+            host = server_config['host']
+            port = server_config['port']
+            username = server_config['username']
+            auth_type = server_config.get('auth_type', 'password')
+
+            # 本地服务器使用psutil
+            if host in ['localhost', '127.0.0.1']:
+                return self._get_local_processes()
+
+            # 远程服务器使用SSH
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            # 连接服务器
+            if auth_type == 'password':
+                ssh.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    password=server_config.get('password'),
+                    timeout=10
+                )
+            else:  # key认证
+                private_key_path = server_config.get('private_key_path')
+                key_password = server_config.get('key_password')
+
+                try:
+                    private_key = paramiko.RSAKey.from_private_key_file(private_key_path, password=key_password)
+                except:
+                    private_key = paramiko.Ed25519Key.from_private_key_file(private_key_path, password=key_password)
+
+                ssh.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    pkey=private_key,
+                    timeout=10
+                )
+
+            # 获取进程信息 - 按CPU使用率排序的前10个进程
+            cmd = "ps aux --sort=-%cpu | head -11 | tail -10 | awk '{print $2,$11,$3,$4,$8}'"
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            process_lines = stdout.read().decode().strip().split('\n')
+
+            processes = []
+            for line in process_lines:
+                if line.strip():
+                    parts = line.strip().split(None, 4)
+                    if len(parts) >= 5:
+                        try:
+                            processes.append({
+                                'pid': int(parts[0]),
+                                'name': parts[1].split('/')[-1][:20],  # 只取程序名，限制长度
+                                'cpu_percent': float(parts[2]),
+                                'memory_percent': float(parts[3]),
+                                'memory_mb': round(float(parts[3]) * 8 * 1024 / 100, 1),  # 估算内存MB
+                                'status': parts[4] if len(parts) > 4 else 'running',
+                                'create_time': 'N/A'
+                            })
+                        except (ValueError, IndexError):
+                            continue
+
+            ssh.close()
+            return processes[:10]  # 返回前10个进程
+
+        except Exception as e:
+            print(f"获取进程数据失败: {e}")
+            return []
+
+    def _get_local_processes(self):
+        """获取本地进程数据"""
+        try:
+            import psutil
+
+            processes = []
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'memory_info', 'status', 'create_time']):
+                try:
+                    pinfo = proc.info
+                    if pinfo['cpu_percent'] is not None and pinfo['cpu_percent'] > 0:
+                        processes.append({
+                            'pid': pinfo['pid'],
+                            'name': pinfo['name'][:20],
+                            'cpu_percent': round(pinfo['cpu_percent'], 1),
+                            'memory_percent': round(pinfo['memory_percent'], 1),
+                            'memory_mb': round(pinfo['memory_info'].rss / 1024 / 1024, 1) if pinfo['memory_info'] else 0,
+                            'status': pinfo['status'],
+                            'create_time': datetime.fromtimestamp(pinfo['create_time']).strftime('%Y-%m-%d %H:%M:%S') if pinfo['create_time'] else 'N/A'
+                        })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            # 按CPU使用率排序，返回前10个
+            return sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)[:10]
+
+        except ImportError:
+            print("psutil库未安装，无法获取本地进程数据")
+            return []
+        except Exception as e:
+            print(f"获取本地进程数据失败: {e}")
+            return []
 
 # 创建服务器监控实例
 server_monitor = ServerMonitor()
@@ -915,13 +1012,19 @@ def get_server_metrics(server_id):
         time_range = request.args.get('timeRange', '1h')
         metrics_data = server_monitor.get_server_metrics(server_id, time_range)
 
-        if metrics_data:
+        if metrics_data and 'error' not in metrics_data:
             return jsonify({
                 'success': True,
                 'data': metrics_data
             })
+        elif metrics_data and 'error' in metrics_data:
+            return jsonify({
+                'success': False,
+                'error': metrics_data['error'],
+                'suggestion': metrics_data.get('suggestion', '')
+            })
         else:
-            return jsonify({'success': False, 'error': '获取监控数据失败'})
+            return jsonify({'success': False, 'error': '无法连接到服务器获取监控数据'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
