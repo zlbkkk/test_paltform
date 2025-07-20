@@ -6,6 +6,10 @@ import sys
 import json
 import os
 import numpy as np
+import sqlite3
+import paramiko
+import threading
+import time
 from datetime import datetime, timedelta
 from contextlib import redirect_stdout, redirect_stderr
 
@@ -282,6 +286,232 @@ class PerformanceAnalyzer:
 # 创建性能分析器实例
 analyzer = PerformanceAnalyzer()
 
+# 服务器监控系统
+class ServerMonitor:
+    def __init__(self):
+        self.servers = {}  # 存储服务器配置
+        self.connections = {}  # SSH连接池
+        self.monitoring_threads = {}  # 监控线程
+        self.metrics_data = {}  # 监控数据存储
+        self.init_storage()
+
+    def init_storage(self):
+        """初始化数据存储"""
+        # 这里简化为内存存储，实际项目中应该使用数据库
+        self.servers = {
+            'demo-server': {
+                'id': 'demo-server',
+                'name': '演示服务器',
+                'host': 'localhost',
+                'port': 22,
+                'username': 'demo',
+                'auth_type': 'password',
+                'password': 'demo123',
+                'enabled': True,
+                'monitor_interval': 30,
+                'description': '本地演示服务器'
+            }
+        }
+        self.metrics_data = {}
+
+    def add_server(self, server_config):
+        """添加服务器配置"""
+        server_id = server_config.get('id') or f"server_{len(self.servers) + 1}"
+        server_config['id'] = server_id
+        self.servers[server_id] = server_config
+        return server_id
+
+    def update_server(self, server_id, server_config):
+        """更新服务器配置"""
+        if server_id in self.servers:
+            server_config['id'] = server_id
+            self.servers[server_id] = server_config
+            return True
+        return False
+
+    def delete_server(self, server_id):
+        """删除服务器"""
+        if server_id in self.servers:
+            # 停止监控
+            self.stop_monitoring(server_id)
+            # 删除配置
+            del self.servers[server_id]
+            # 清理数据
+            if server_id in self.metrics_data:
+                del self.metrics_data[server_id]
+            return True
+        return False
+
+    def test_connection(self, server_config):
+        """测试服务器连接"""
+        try:
+            if server_config['host'] == 'localhost':
+                # 本地服务器模拟
+                return True, "连接成功"
+
+            # 实际SSH连接测试（需要paramiko库）
+            # ssh = paramiko.SSHClient()
+            # ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # ssh.connect(
+            #     hostname=server_config['host'],
+            #     port=server_config['port'],
+            #     username=server_config['username'],
+            #     password=server_config.get('password'),
+            #     key_filename=server_config.get('private_key_path'),
+            #     timeout=10
+            # )
+            # ssh.close()
+
+            # 模拟连接测试
+            return True, "连接成功"
+
+        except Exception as e:
+            return False, str(e)
+
+    def get_server_metrics(self, server_id, time_range='1h'):
+        """获取服务器监控数据"""
+        if server_id not in self.servers:
+            return None
+
+        # 生成模拟数据
+        current_time = datetime.now()
+
+        # 解析时间范围
+        if time_range == '5m':
+            duration_minutes = 5
+            interval_seconds = 10
+        elif time_range == '15m':
+            duration_minutes = 15
+            interval_seconds = 30
+        elif time_range == '1h':
+            duration_minutes = 60
+            interval_seconds = 60
+        elif time_range == '6h':
+            duration_minutes = 360
+            interval_seconds = 360
+        elif time_range == '24h':
+            duration_minutes = 1440
+            interval_seconds = 1440
+        else:
+            duration_minutes = 60
+            interval_seconds = 60
+
+        # 生成时间序列
+        timestamps = []
+        cpu_data = []
+        memory_data = []
+        disk_read_data = []
+        disk_write_data = []
+        network_sent_data = []
+        network_recv_data = []
+
+        points = duration_minutes * 60 // interval_seconds
+
+        for i in range(points):
+            timestamp = current_time - timedelta(seconds=(points - i - 1) * interval_seconds)
+            timestamps.append(timestamp.strftime('%H:%M:%S'))
+
+            # 生成模拟数据（带一些波动）
+            base_cpu = 30 + 20 * np.sin(i * 0.1) + np.random.normal(0, 5)
+            cpu_data.append(max(0, min(100, base_cpu)))
+
+            base_memory = 60 + 10 * np.sin(i * 0.05) + np.random.normal(0, 3)
+            memory_data.append(max(0, min(100, base_memory)))
+
+            disk_read_data.append(max(0, 1024 * 1024 * (5 + np.random.normal(0, 2))))
+            disk_write_data.append(max(0, 1024 * 1024 * (3 + np.random.normal(0, 1))))
+
+            network_sent_data.append(max(0, 1024 * (100 + np.random.normal(0, 20))))
+            network_recv_data.append(max(0, 1024 * (150 + np.random.normal(0, 30))))
+
+        # 当前指标
+        current_metrics = {
+            'cpu': round(cpu_data[-1], 1) if cpu_data else 0,
+            'load_avg': round(cpu_data[-1] / 100 * 4, 2) if cpu_data else 0,
+            'memory_percent': round(memory_data[-1], 1) if memory_data else 0,
+            'memory_used': round(memory_data[-1] / 100 * 8, 1) if memory_data else 0,
+            'memory_total': 8.0,
+            'disk_percent': round(np.random.uniform(40, 60), 1),
+            'disk_free': round(np.random.uniform(100, 200), 1),
+            'network_sent': int(network_sent_data[-1]) if network_sent_data else 0,
+            'network_recv': int(network_recv_data[-1]) if network_recv_data else 0
+        }
+
+        # 历史数据
+        historical_data = {
+            'timestamps': timestamps,
+            'cpu': [round(x, 1) for x in cpu_data],
+            'memory': [round(x, 1) for x in memory_data],
+            'disk_read': [int(x) for x in disk_read_data],
+            'disk_write': [int(x) for x in disk_write_data],
+            'network_sent': [int(x) for x in network_sent_data],
+            'network_recv': [int(x) for x in network_recv_data]
+        }
+
+        # 进程数据
+        processes = self._generate_mock_processes()
+
+        return {
+            'current': current_metrics,
+            'historical': historical_data,
+            'processes': processes
+        }
+
+    def _generate_mock_processes(self):
+        """生成模拟进程数据"""
+        processes = [
+            {
+                'pid': 1234,
+                'name': 'python3',
+                'cpu_percent': round(np.random.uniform(5, 25), 1),
+                'memory_percent': round(np.random.uniform(2, 8), 1),
+                'memory_mb': round(np.random.uniform(100, 500), 1),
+                'status': 'running',
+                'create_time': '2025-07-20 10:30:15'
+            },
+            {
+                'pid': 5678,
+                'name': 'nginx',
+                'cpu_percent': round(np.random.uniform(1, 5), 1),
+                'memory_percent': round(np.random.uniform(1, 3), 1),
+                'memory_mb': round(np.random.uniform(50, 150), 1),
+                'status': 'running',
+                'create_time': '2025-07-20 09:15:30'
+            },
+            {
+                'pid': 9012,
+                'name': 'mysql',
+                'cpu_percent': round(np.random.uniform(2, 15), 1),
+                'memory_percent': round(np.random.uniform(5, 15), 1),
+                'memory_mb': round(np.random.uniform(200, 800), 1),
+                'status': 'running',
+                'create_time': '2025-07-20 08:45:00'
+            },
+            {
+                'pid': 3456,
+                'name': 'redis-server',
+                'cpu_percent': round(np.random.uniform(0.5, 3), 1),
+                'memory_percent': round(np.random.uniform(1, 5), 1),
+                'memory_mb': round(np.random.uniform(30, 100), 1),
+                'status': 'running',
+                'create_time': '2025-07-20 08:30:45'
+            },
+            {
+                'pid': 7890,
+                'name': 'java',
+                'cpu_percent': round(np.random.uniform(10, 30), 1),
+                'memory_percent': round(np.random.uniform(8, 20), 1),
+                'memory_mb': round(np.random.uniform(500, 1500), 1),
+                'status': 'running',
+                'create_time': '2025-07-20 09:00:20'
+            }
+        ]
+
+        return sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)
+
+# 创建服务器监控实例
+server_monitor = ServerMonitor()
+
 @app.route('/api/analyze-monitoring-data', methods=['POST'])
 def analyze_monitoring_data_api():
     """分析监控数据API"""
@@ -355,6 +585,153 @@ def analyze_monitoring_data():
 
     except Exception as e:
         return jsonify({'success': False, 'error': f'分析数据时出错: {str(e)}'})
+
+# 服务器监控API路由
+@app.route('/api/servers', methods=['GET'])
+def get_servers():
+    """获取服务器列表"""
+    try:
+        servers_list = list(server_monitor.servers.values())
+        return jsonify({
+            'success': True,
+            'data': servers_list
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers', methods=['POST'])
+def add_server():
+    """添加服务器"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '没有提供数据'})
+
+        server_id = server_monitor.add_server(data)
+        return jsonify({
+            'success': True,
+            'data': server_monitor.servers[server_id]
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers/<server_id>', methods=['PUT'])
+def update_server(server_id):
+    """更新服务器配置"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '没有提供数据'})
+
+        success = server_monitor.update_server(server_id, data)
+        if success:
+            return jsonify({
+                'success': True,
+                'data': server_monitor.servers[server_id]
+            })
+        else:
+            return jsonify({'success': False, 'error': '服务器不存在'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers/<server_id>', methods=['DELETE'])
+def delete_server(server_id):
+    """删除服务器"""
+    try:
+        success = server_monitor.delete_server(server_id)
+        if success:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': '服务器不存在'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers/test', methods=['POST'])
+@app.route('/api/servers/<server_id>/test', methods=['POST'])
+def test_server_connection(server_id=None):
+    """测试服务器连接"""
+    try:
+        if server_id:
+            # 测试已配置的服务器
+            if server_id not in server_monitor.servers:
+                return jsonify({'success': False, 'error': '服务器不存在'})
+            server_config = server_monitor.servers[server_id]
+        else:
+            # 测试新的服务器配置
+            server_config = request.get_json()
+            if not server_config:
+                return jsonify({'success': False, 'error': '没有提供服务器配置'})
+
+        success, message = server_monitor.test_connection(server_config)
+        return jsonify({
+            'success': success,
+            'message': message,
+            'error': message if not success else None
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers/<server_id>/metrics', methods=['GET'])
+def get_server_metrics(server_id):
+    """获取服务器监控数据"""
+    try:
+        if server_id not in server_monitor.servers:
+            return jsonify({'success': False, 'error': '服务器不存在'})
+
+        time_range = request.args.get('timeRange', '1h')
+        metrics_data = server_monitor.get_server_metrics(server_id, time_range)
+
+        if metrics_data:
+            return jsonify({
+                'success': True,
+                'data': metrics_data
+            })
+        else:
+            return jsonify({'success': False, 'error': '获取监控数据失败'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers/<server_id>/metrics/realtime', methods=['GET'])
+def get_server_realtime_metrics(server_id):
+    """获取服务器实时数据"""
+    try:
+        if server_id not in server_monitor.servers:
+            return jsonify({'success': False, 'error': '服务器不存在'})
+
+        # 获取最新的监控数据
+        metrics_data = server_monitor.get_server_metrics(server_id, '5m')
+
+        if metrics_data:
+            return jsonify({
+                'success': True,
+                'data': metrics_data['current'],
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({'success': False, 'error': '获取实时数据失败'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/servers/<server_id>/processes', methods=['GET'])
+def get_server_processes(server_id):
+    """获取服务器进程列表"""
+    try:
+        if server_id not in server_monitor.servers:
+            return jsonify({'success': False, 'error': '服务器不存在'})
+
+        limit = request.args.get('limit', 10, type=int)
+        metrics_data = server_monitor.get_server_metrics(server_id, '5m')
+
+        if metrics_data and 'processes' in metrics_data:
+            processes = metrics_data['processes'][:limit]
+            return jsonify({
+                'success': True,
+                'data': processes
+            })
+        else:
+            return jsonify({'success': False, 'error': '获取进程数据失败'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/performance-monitor')
 def performance_monitor():

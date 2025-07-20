@@ -161,6 +161,22 @@ export const constantRoutes = [
     ]
   },
 
+  {
+    path: '/server-monitor',
+    component: Layout,
+    redirect: '/server-monitor/dashboard',
+    name: 'ServerMonitor',
+    meta: { title: '服务器监控', icon: 'el-icon-monitor' },
+    children: [
+      {
+        path: 'dashboard',
+        name: 'ServerMonitorDashboard',
+        component: () => import('@/views/server-monitor/dashboard'),
+        meta: { title: '监控面板', icon: 'el-icon-monitor' }
+      }
+    ]
+  },
+
   // 404 page must be placed at the end !!!
   { path: '*', redirect: '/404', hidden: true }
 ]
