@@ -27,7 +27,15 @@
         <el-button @click="refreshData" :loading="loading">
           <i class="el-icon-refresh"></i> 刷新
         </el-button>
-        
+
+        <el-button @click="reinitCharts" type="warning" size="small">
+          <i class="el-icon-refresh-right"></i> 重新初始化图表
+        </el-button>
+
+        <el-button @click="generateTestData" type="success" size="small">
+          <i class="el-icon-data-line"></i> 生成测试数据
+        </el-button>
+
         <el-switch
           v-model="autoRefresh"
           active-text="自动刷新"
@@ -347,7 +355,20 @@ export default {
   },
   mounted() {
     this.loadServers()
-    this.initCharts()
+    // 延迟初始化图表，确保DOM完全渲染
+    this.$nextTick(() => {
+      setTimeout(() => {
+        console.log('🚀 开始初始化图表...')
+        this.initCharts()
+        // 再次延迟，确保图表完全初始化后再尝试更新
+        setTimeout(() => {
+          if (this.historicalData && this.historicalData.timestamps && this.historicalData.timestamps.length > 0) {
+            console.log('🔄 延迟更新图表数据')
+            this.updateCharts()
+          }
+        }, 500)
+      }, 200)
+    })
   },
   beforeDestroy() {
     this.stopAutoRefresh()
@@ -376,11 +397,19 @@ export default {
       
       // 测试连接
       await this.testConnection()
-      
+
       if (this.connectionStatus === 'connected') {
+        // 确保图表已初始化
+        if (!this.charts.cpu || !this.charts.memory || !this.charts.disk || !this.charts.network) {
+          console.log('🔄 重新初始化图表...')
+          this.initCharts()
+          // 等待图表初始化完成
+          await this.$nextTick()
+        }
+
         // 加载数据
         await this.loadServerData()
-        
+
         // 启动自动刷新
         if (this.autoRefresh) {
           this.startAutoRefresh()
@@ -413,6 +442,14 @@ export default {
           this.currentMetrics = response.data.current
           this.historicalData = response.data.historical
           this.topProcesses = response.data.processes || []
+
+          console.log('📊 获取到历史数据:', {
+            timeRange: this.timeRange,
+            timestamps: this.historicalData.timestamps ? this.historicalData.timestamps.length : 0,
+            cpuData: this.historicalData.cpu ? this.historicalData.cpu.length : 0,
+            firstTime: this.historicalData.timestamps ? this.historicalData.timestamps[0] : null,
+            lastTime: this.historicalData.timestamps ? this.historicalData.timestamps[this.historicalData.timestamps.length - 1] : null
+          })
 
           // 更新图表
           this.updateCharts()
@@ -451,6 +488,7 @@ export default {
     },
 
     onTimeRangeChange() {
+      console.log('🕐 时间范围变化:', this.timeRange)
       this.loadServerData()
     },
 
@@ -535,22 +573,43 @@ export default {
     // 图表相关方法
     initCharts() {
       this.$nextTick(() => {
+        console.log('🎨 初始化图表...')
         if (this.$refs.cpuChart) {
           this.charts.cpu = echarts.init(this.$refs.cpuChart, 'dark')
+          console.log('✅ CPU图表初始化成功')
+        } else {
+          console.log('❌ CPU图表DOM元素未找到')
         }
         if (this.$refs.memoryChart) {
           this.charts.memory = echarts.init(this.$refs.memoryChart, 'dark')
+          console.log('✅ 内存图表初始化成功')
+        } else {
+          console.log('❌ 内存图表DOM元素未找到')
         }
         if (this.$refs.diskChart) {
           this.charts.disk = echarts.init(this.$refs.diskChart, 'dark')
+          console.log('✅ 磁盘图表初始化成功')
+        } else {
+          console.log('❌ 磁盘图表DOM元素未找到')
         }
         if (this.$refs.networkChart) {
           this.charts.network = echarts.init(this.$refs.networkChart, 'dark')
+          console.log('✅ 网络图表初始化成功')
+        } else {
+          console.log('❌ 网络图表DOM元素未找到')
+        }
+
+        // 初始化后立即更新图表（如果有数据）
+        if (this.historicalData && this.historicalData.timestamps && this.historicalData.timestamps.length > 0) {
+          console.log('🔄 图表初始化后立即更新数据')
+          this.updateCharts()
         }
       })
     },
 
     updateCharts() {
+      console.log('📈 更新图表，时间范围:', this.timeRange)
+      console.log('📈 历史数据:', this.historicalData)
       this.updateCpuChart()
       this.updateMemoryChart()
       this.updateDiskChart()
@@ -558,8 +617,18 @@ export default {
     },
 
     updateCpuChart() {
-      if (!this.charts.cpu) return
-      
+      if (!this.charts.cpu) {
+        console.log('❌ CPU图表未初始化')
+        return
+      }
+
+      console.log('📊 更新CPU图表，数据:', {
+        timestamps: this.historicalData.timestamps ? this.historicalData.timestamps.length : 0,
+        cpu: this.historicalData.cpu ? this.historicalData.cpu.length : 0,
+        timestampsData: this.historicalData.timestamps,
+        cpuData: this.historicalData.cpu
+      })
+
       const option = {
         tooltip: {
           trigger: 'axis',
@@ -567,7 +636,7 @@ export default {
         },
         xAxis: {
           type: 'category',
-          data: this.historicalData.timestamps
+          data: this.historicalData.timestamps || []
         },
         yAxis: {
           type: 'value',
@@ -578,7 +647,7 @@ export default {
           }
         },
         series: [{
-          data: this.historicalData.cpu,
+          data: this.historicalData.cpu || [],
           type: 'line',
           smooth: true,
           itemStyle: {
@@ -589,12 +658,21 @@ export default {
           }
         }]
       }
-      
+
       this.charts.cpu.setOption(option)
+      console.log('✅ CPU图表更新完成')
     },
 
     updateMemoryChart() {
-      if (!this.charts.memory) return
+      if (!this.charts.memory) {
+        console.log('❌ 内存图表未初始化')
+        return
+      }
+
+      console.log('📊 更新内存图表，数据:', {
+        timestamps: this.historicalData.timestamps ? this.historicalData.timestamps.length : 0,
+        memory: this.historicalData.memory ? this.historicalData.memory.length : 0
+      })
       
       const option = {
         tooltip: {
@@ -630,7 +708,16 @@ export default {
     },
 
     updateDiskChart() {
-      if (!this.charts.disk) return
+      if (!this.charts.disk) {
+        console.log('❌ 磁盘图表未初始化')
+        return
+      }
+
+      console.log('📊 更新磁盘图表，数据:', {
+        timestamps: this.historicalData.timestamps ? this.historicalData.timestamps.length : 0,
+        diskRead: this.historicalData.diskRead ? this.historicalData.diskRead.length : 0,
+        diskWrite: this.historicalData.diskWrite ? this.historicalData.diskWrite.length : 0
+      })
       
       const option = {
         tooltip: {
@@ -638,6 +725,12 @@ export default {
         },
         legend: {
           data: ['读取', '写入']
+        },
+        grid: {
+          left: '80px',  // 为Y轴标签留出足够空间
+          right: '20px',
+          top: '60px',
+          bottom: '60px'
         },
         xAxis: {
           type: 'category',
@@ -652,7 +745,7 @@ export default {
         series: [
           {
             name: '读取',
-            data: this.historicalData.disk_read,
+            data: this.historicalData.diskRead || this.historicalData.disk_read || [],
             type: 'line',
             smooth: true,
             itemStyle: {
@@ -661,7 +754,7 @@ export default {
           },
           {
             name: '写入',
-            data: this.historicalData.disk_write,
+            data: this.historicalData.diskWrite || this.historicalData.disk_write || [],
             type: 'line',
             smooth: true,
             itemStyle: {
@@ -675,7 +768,16 @@ export default {
     },
 
     updateNetworkChart() {
-      if (!this.charts.network) return
+      if (!this.charts.network) {
+        console.log('❌ 网络图表未初始化')
+        return
+      }
+
+      console.log('📊 更新网络图表，数据:', {
+        timestamps: this.historicalData.timestamps ? this.historicalData.timestamps.length : 0,
+        networkIn: this.historicalData.networkIn ? this.historicalData.networkIn.length : 0,
+        networkOut: this.historicalData.networkOut ? this.historicalData.networkOut.length : 0
+      })
       
       const option = {
         tooltip: {
@@ -683,6 +785,12 @@ export default {
         },
         legend: {
           data: ['发送', '接收']
+        },
+        grid: {
+          left: '80px',  // 为Y轴标签留出足够空间
+          right: '20px',
+          top: '60px',
+          bottom: '60px'
         },
         xAxis: {
           type: 'category',
@@ -697,7 +805,7 @@ export default {
         series: [
           {
             name: '发送',
-            data: this.historicalData.network_sent,
+            data: this.historicalData.networkOut || this.historicalData.network_sent || [],
             type: 'line',
             smooth: true,
             itemStyle: {
@@ -706,7 +814,7 @@ export default {
           },
           {
             name: '接收',
-            data: this.historicalData.network_recv,
+            data: this.historicalData.networkIn || this.historicalData.network_recv || [],
             type: 'line',
             smooth: true,
             itemStyle: {
@@ -730,6 +838,104 @@ export default {
           chart.dispose()
         }
       })
+    },
+
+    // 强制重新渲染所有图表
+    forceResizeCharts() {
+      console.log('🔄 强制重新渲染图表...')
+      this.$nextTick(() => {
+        Object.values(this.charts).forEach(chart => {
+          if (chart) {
+            chart.resize()
+          }
+        })
+      })
+    },
+
+    // 重新初始化图表
+    reinitCharts() {
+      console.log('🔄 重新初始化图表...')
+      this.destroyCharts()
+      this.charts = {
+        cpu: null,
+        memory: null,
+        disk: null,
+        network: null
+      }
+      setTimeout(() => {
+        this.initCharts()
+      }, 100)
+    },
+
+    // 生成测试数据
+    generateTestData() {
+      console.log('🎲 生成测试数据...')
+
+      const now = new Date()
+      const timestamps = []
+      const cpu = []
+      const memory = []
+      const diskRead = []
+      const diskWrite = []
+      const networkIn = []
+      const networkOut = []
+
+      // 根据时间范围生成不同数量的数据点
+      let dataPoints = 30
+      let intervalMinutes = 1
+
+      switch (this.timeRange) {
+        case '5m':
+          dataPoints = 30
+          intervalMinutes = 0.2 // 12秒
+          break
+        case '15m':
+          dataPoints = 30
+          intervalMinutes = 0.5 // 30秒
+          break
+        case '1h':
+          dataPoints = 30
+          intervalMinutes = 2 // 2分钟
+          break
+        case '6h':
+          dataPoints = 30
+          intervalMinutes = 12 // 12分钟
+          break
+        case '24h':
+          dataPoints = 30
+          intervalMinutes = 48 // 48分钟
+          break
+      }
+
+      for (let i = 0; i < dataPoints; i++) {
+        const time = new Date(now.getTime() - (dataPoints - i) * intervalMinutes * 60 * 1000)
+        timestamps.push(time.toLocaleTimeString())
+
+        // 生成随机但有趋势的数据
+        cpu.push(Math.max(0, Math.min(100, 30 + Math.sin(i * 0.3) * 20 + Math.random() * 10)))
+        memory.push(Math.max(0, Math.min(100, 40 + Math.sin(i * 0.2) * 15 + Math.random() * 8)))
+        diskRead.push(Math.max(0, 50 + Math.sin(i * 0.4) * 30 + Math.random() * 20))
+        diskWrite.push(Math.max(0, 30 + Math.sin(i * 0.5) * 20 + Math.random() * 15))
+        networkIn.push(Math.max(0, 100 + Math.sin(i * 0.3) * 50 + Math.random() * 30))
+        networkOut.push(Math.max(0, 80 + Math.sin(i * 0.4) * 40 + Math.random() * 25))
+      }
+
+      this.historicalData = {
+        timestamps,
+        cpu,
+        memory,
+        diskRead,
+        diskWrite,
+        networkIn,
+        networkOut
+      }
+
+      console.log('✅ 测试数据生成完成:', this.historicalData)
+
+      // 更新图表
+      this.updateCharts()
+
+      this.$message.success('测试数据生成成功！')
     }
   }
 }

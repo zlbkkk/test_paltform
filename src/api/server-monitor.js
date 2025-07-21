@@ -30,7 +30,8 @@ export function testServerConnection(serverId, serverConfig = null) {
   return request({
     url: serverId ? `/api/servers/${serverId}/test` : '/api/servers/test',
     method: 'post',
-    data: serverConfig
+    data: serverConfig,
+    timeout: 45000 // 连接测试需要更长时间，设置45秒超时
   })
 }
 

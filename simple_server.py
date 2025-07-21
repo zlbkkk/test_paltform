@@ -23,7 +23,222 @@ except ImportError:
     print("⚠️  警告: paramiko库未安装，SSH连接功能将被禁用")
     print("   安装命令: pip install paramiko")
 
-app = Flask(__name__)
+class HistoricalDataPersistence:
+    """历史数据持久化管理类"""
+
+    def __init__(self, data_dir='historical_data'):
+        self.data_dir = data_dir
+        self.ensure_data_dir()
+
+    def ensure_data_dir(self):
+        """确保数据目录存在"""
+        if not os.path.exists(self.data_dir):
+            os.makedirs(self.data_dir)
+            print(f"📁 创建历史数据目录: {self.data_dir}")
+
+    def get_file_path(self, server_id, metric_type):
+        """获取指定服务器和指标类型的文件路径"""
+        filename = f"{server_id}_{metric_type}.txt"
+        return os.path.join(self.data_dir, filename)
+
+    def save_historical_data(self, server_id, historical_data):
+        """保存历史数据到文件（追加模式）"""
+        try:
+            # 保存CPU数据
+            self._append_metric_data(server_id, 'cpu', historical_data['timestamps'], historical_data['cpu'])
+
+            # 保存内存数据
+            self._append_metric_data(server_id, 'memory', historical_data['timestamps'], historical_data['memory'])
+
+            # 保存磁盘IO数据
+            self._append_disk_io_data(server_id, historical_data['timestamps'],
+                                    historical_data['disk_read'], historical_data['disk_write'])
+
+            # 保存网络数据
+            self._append_network_data(server_id, historical_data['timestamps'],
+                                    historical_data['network_sent'], historical_data['network_recv'])
+
+            print(f"💾 历史数据已追加保存到文件: {server_id}")
+
+        except Exception as e:
+            print(f"❌ 保存历史数据失败: {e}")
+
+    def _append_metric_data(self, server_id, metric_type, timestamps, values):
+        """追加单一指标数据（CPU或内存）"""
+        file_path = self.get_file_path(server_id, metric_type)
+
+        # 加载现有数据
+        existing_data = {'timestamps': [], 'values': []}
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+            except:
+                pass  # 如果文件损坏，从空数据开始
+
+        # 合并数据（避免重复时间戳）
+        existing_timestamps = set(existing_data.get('timestamps', []))
+        for i, timestamp in enumerate(timestamps):
+            if timestamp not in existing_timestamps:
+                existing_data['timestamps'].append(timestamp)
+                existing_data['values'].append(values[i])
+
+        # 限制数据点数量（保留最新的1000个数据点）
+        max_points = 1000
+        if len(existing_data['timestamps']) > max_points:
+            existing_data['timestamps'] = existing_data['timestamps'][-max_points:]
+            existing_data['values'] = existing_data['values'][-max_points:]
+
+        # 保存更新后的数据
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+
+    def _append_disk_io_data(self, server_id, timestamps, disk_read, disk_write):
+        """追加磁盘IO数据"""
+        file_path = self.get_file_path(server_id, 'disk_io')
+
+        # 加载现有数据
+        existing_data = {'timestamps': [], 'disk_read': [], 'disk_write': []}
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+            except:
+                pass
+
+        # 合并数据
+        existing_timestamps = set(existing_data.get('timestamps', []))
+        for i, timestamp in enumerate(timestamps):
+            if timestamp not in existing_timestamps:
+                existing_data['timestamps'].append(timestamp)
+                existing_data['disk_read'].append(disk_read[i])
+                existing_data['disk_write'].append(disk_write[i])
+
+        # 限制数据点数量
+        max_points = 1000
+        if len(existing_data['timestamps']) > max_points:
+            existing_data['timestamps'] = existing_data['timestamps'][-max_points:]
+            existing_data['disk_read'] = existing_data['disk_read'][-max_points:]
+            existing_data['disk_write'] = existing_data['disk_write'][-max_points:]
+
+        # 保存更新后的数据
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+
+    def _append_network_data(self, server_id, timestamps, network_sent, network_recv):
+        """追加网络数据"""
+        file_path = self.get_file_path(server_id, 'network')
+
+        # 加载现有数据
+        existing_data = {'timestamps': [], 'network_sent': [], 'network_recv': []}
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+            except:
+                pass
+
+        # 合并数据
+        existing_timestamps = set(existing_data.get('timestamps', []))
+        for i, timestamp in enumerate(timestamps):
+            if timestamp not in existing_timestamps:
+                existing_data['timestamps'].append(timestamp)
+                existing_data['network_sent'].append(network_sent[i])
+                existing_data['network_recv'].append(network_recv[i])
+
+        # 限制数据点数量
+        max_points = 1000
+        if len(existing_data['timestamps']) > max_points:
+            existing_data['timestamps'] = existing_data['timestamps'][-max_points:]
+            existing_data['network_sent'] = existing_data['network_sent'][-max_points:]
+            existing_data['network_recv'] = existing_data['network_recv'][-max_points:]
+
+        # 保存更新后的数据
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+
+    def append_realtime_data(self, server_id, timestamp, cpu, memory, disk_read, disk_write, network_sent, network_recv):
+        """追加单个实时数据点"""
+        try:
+            # 追加CPU数据
+            self._append_metric_data(server_id, 'cpu', [timestamp], [cpu])
+
+            # 追加内存数据
+            self._append_metric_data(server_id, 'memory', [timestamp], [memory])
+
+            # 追加磁盘IO数据
+            self._append_disk_io_data(server_id, [timestamp], [disk_read], [disk_write])
+
+            # 追加网络数据
+            self._append_network_data(server_id, [timestamp], [network_sent], [network_recv])
+
+            print(f"📊 实时数据已追加: {server_id} @ {timestamp}")
+
+        except Exception as e:
+            print(f"❌ 追加实时数据失败: {e}")
+
+    def load_historical_data(self, server_id):
+        """从文件加载历史数据"""
+        try:
+            result = {
+                'timestamps': [],
+                'cpu': [],
+                'memory': [],
+                'disk_read': [],
+                'disk_write': [],
+                'network_sent': [],
+                'network_recv': []
+            }
+
+            # 加载CPU数据
+            cpu_file = self.get_file_path(server_id, 'cpu')
+            if os.path.exists(cpu_file):
+                with open(cpu_file, 'r', encoding='utf-8') as f:
+                    cpu_data = json.load(f)
+                    result['timestamps'] = cpu_data.get('timestamps', [])
+                    result['cpu'] = cpu_data.get('values', [])
+
+            # 加载内存数据
+            memory_file = self.get_file_path(server_id, 'memory')
+            if os.path.exists(memory_file):
+                with open(memory_file, 'r', encoding='utf-8') as f:
+                    memory_data = json.load(f)
+                    if not result['timestamps']:  # 如果CPU数据没有时间戳，使用内存数据的
+                        result['timestamps'] = memory_data.get('timestamps', [])
+                    result['memory'] = memory_data.get('values', [])
+
+            # 加载磁盘IO数据
+            disk_file = self.get_file_path(server_id, 'disk_io')
+            if os.path.exists(disk_file):
+                with open(disk_file, 'r', encoding='utf-8') as f:
+                    disk_data = json.load(f)
+                    if not result['timestamps']:
+                        result['timestamps'] = disk_data.get('timestamps', [])
+                    result['disk_read'] = disk_data.get('disk_read', [])
+                    result['disk_write'] = disk_data.get('disk_write', [])
+
+            # 加载网络数据
+            network_file = self.get_file_path(server_id, 'network')
+            if os.path.exists(network_file):
+                with open(network_file, 'r', encoding='utf-8') as f:
+                    network_data = json.load(f)
+                    if not result['timestamps']:
+                        result['timestamps'] = network_data.get('timestamps', [])
+                    result['network_sent'] = network_data.get('network_sent', [])
+                    result['network_recv'] = network_data.get('network_recv', [])
+
+            if result['timestamps']:
+                print(f"📖 从文件加载历史数据: {server_id}, {len(result['timestamps'])}个数据点")
+                return result
+            else:
+                print(f"📖 未找到历史数据文件: {server_id}")
+                return None
+
+        except Exception as e:
+            print(f"❌ 加载历史数据失败: {e}")
+            return None
+
+app = Flask(__name__, static_folder='dist/static', template_folder='dist')
 CORS(app)
 
 @app.route('/')
@@ -303,13 +518,159 @@ class ServerMonitor:
         self.connections = {}  # SSH连接池
         self.monitoring_threads = {}  # 监控线程
         self.metrics_data = {}  # 监控数据存储
+        self.historical_cache = {}  # 历史数据缓存
+        self.last_update_time = {}  # 上次更新时间
+        self.persistence = HistoricalDataPersistence()  # 历史数据持久化
+
+        # 🚀 新增：性能优化缓存
+        self.performance_cache = {}  # API响应缓存
+        self.cache_ttl = 30  # 缓存30秒
+        self.max_data_points = 200  # 最多返回200个数据点
+        self.background_update_interval = 10  # 后台更新间隔10秒
+        self.background_thread = None  # 后台更新线程
+        self.is_running = False  # 后台线程运行状态
+
         self.init_storage()
+        self.start_background_update()  # 启动后台更新
 
     def init_storage(self):
         """初始化数据存储"""
         # 这里简化为内存存储，实际项目中应该使用数据库
         self.servers = {}  # 空的服务器列表，需要用户手动添加
         self.metrics_data = {}
+
+    def start_background_update(self):
+        """🚀 启动后台数据更新线程"""
+        if self.background_thread and self.background_thread.is_alive():
+            return
+
+        self.is_running = True
+        self.background_thread = threading.Thread(target=self._background_update_worker, daemon=True)
+        self.background_thread.start()
+        print("🔄 后台数据更新线程已启动")
+
+    def stop_background_update(self):
+        """停止后台数据更新线程"""
+        self.is_running = False
+        if self.background_thread:
+            self.background_thread.join(timeout=5)
+        print("🛑 后台数据更新线程已停止")
+
+    def _background_update_worker(self):
+        """后台数据更新工作线程"""
+        import time
+
+        while self.is_running:
+            try:
+                current_time = datetime.now()
+
+                # 为每个服务器更新缓存数据
+                for server_id in list(self.servers.keys()):
+                    try:
+                        self._update_server_cache(server_id, current_time)
+                    except Exception as e:
+                        print(f"❌ 更新服务器 {server_id} 缓存失败: {e}")
+
+                # 清理过期缓存
+                self._cleanup_expired_cache(current_time)
+
+                # 等待下次更新
+                time.sleep(self.background_update_interval)
+
+            except Exception as e:
+                print(f"❌ 后台更新线程错误: {e}")
+                time.sleep(5)
+
+    def _update_server_cache(self, server_id, current_time):
+        """更新单个服务器的缓存数据"""
+        if server_id not in self.servers:
+            return
+
+        server_config = self.servers[server_id]
+
+        # 获取实时监控数据
+        real_metrics = self.get_real_server_metrics(server_config)
+        if not real_metrics:
+            return
+
+        # 更新缓存中的实时数据
+        cache_key = f"{server_id}_realtime"
+        self.performance_cache[cache_key] = {
+            'data': real_metrics,
+            'timestamp': current_time,
+            'ttl': self.cache_ttl
+        }
+
+        # 更新历史数据缓存
+        for time_range in ['1h', '6h', '24h']:
+            cache_key = f"{server_id}_metrics_{time_range}"
+
+            # 检查是否需要更新
+            if (cache_key not in self.performance_cache or
+                (current_time - self.performance_cache[cache_key]['timestamp']).total_seconds() > self.cache_ttl):
+
+                # 生成历史数据
+                historical_data = self._get_cached_historical_data(server_id, time_range, real_metrics)
+
+                self.performance_cache[cache_key] = {
+                    'data': historical_data,
+                    'timestamp': current_time,
+                    'ttl': self.cache_ttl
+                }
+
+                print(f"🔄 已更新缓存: {cache_key}")
+
+    def _cleanup_expired_cache(self, current_time):
+        """清理过期的缓存数据"""
+        expired_keys = []
+
+        for cache_key, cache_data in self.performance_cache.items():
+            if (current_time - cache_data['timestamp']).total_seconds() > cache_data['ttl']:
+                expired_keys.append(cache_key)
+
+        for key in expired_keys:
+            del self.performance_cache[key]
+
+        if expired_keys:
+            print(f"🧹 清理了 {len(expired_keys)} 个过期缓存")
+
+    def _get_cached_historical_data(self, server_id, time_range, current_metrics):
+        """获取缓存的历史数据（限制数据点数量）"""
+        # 优先从文件加载历史数据
+        historical_data = self.persistence.load_historical_data(server_id)
+
+        if historical_data and historical_data.get('timestamps'):
+            # 限制数据点数量
+            timestamps = historical_data['timestamps']
+            if len(timestamps) > self.max_data_points:
+                # 均匀采样，保留最重要的数据点
+                step = len(timestamps) // self.max_data_points
+                indices = list(range(0, len(timestamps), step))
+                if len(indices) > self.max_data_points:
+                    indices = indices[:self.max_data_points]
+
+                # 确保包含最新的数据点
+                if indices[-1] != len(timestamps) - 1:
+                    indices[-1] = len(timestamps) - 1
+
+                # 重新构建数据
+                sampled_data = {
+                    'timestamps': [timestamps[i] for i in indices],
+                    'cpu_data': [historical_data.get('cpu_data', [])[i] if i < len(historical_data.get('cpu_data', [])) else 0 for i in indices],
+                    'memory_data': [historical_data.get('memory_data', [])[i] if i < len(historical_data.get('memory_data', [])) else 0 for i in indices],
+                    'disk_read_data': [historical_data.get('disk_read_data', [])[i] if i < len(historical_data.get('disk_read_data', [])) else 0 for i in indices],
+                    'disk_write_data': [historical_data.get('disk_write_data', [])[i] if i < len(historical_data.get('disk_write_data', [])) else 0 for i in indices],
+                    'network_sent': [historical_data.get('network_sent', [])[i] if i < len(historical_data.get('network_sent', [])) else 0 for i in indices],
+                    'network_recv': [historical_data.get('network_recv', [])[i] if i < len(historical_data.get('network_recv', [])) else 0 for i in indices]
+                }
+
+                print(f"📊 数据采样: {len(timestamps)} -> {len(sampled_data['timestamps'])} 个数据点")
+                return sampled_data
+            else:
+                return historical_data
+        else:
+            # 如果没有历史数据，生成新的（但限制数量）
+            return self._generate_historical_data(time_range, current_metrics, limit_points=True)
 
     def add_server(self, server_config):
         """添加服务器配置"""
@@ -341,19 +702,25 @@ class ServerMonitor:
 
     def test_connection(self, server_config):
         """测试服务器连接"""
+        print(f"🔍 开始测试连接: {server_config.get('host')}:{server_config.get('port')}")
+        print(f"   用户名: {server_config.get('username')}")
+        print(f"   认证方式: {server_config.get('auth_type', 'password')}")
+
         try:
             host = server_config['host']
             port = server_config['port']
             username = server_config['username']
             auth_type = server_config.get('auth_type', 'password')
 
-            # 本地服务器特殊处理
-            if host in ['localhost', '127.0.0.1']:
-                return True, "本地服务器连接成功"
+            # 验证必要参数
+            if not host or not port or not username:
+                return False, "缺少必要的连接参数（主机、端口、用户名）"
 
             # 检查paramiko是否可用
             if not PARAMIKO_AVAILABLE:
                 return False, "SSH连接功能不可用，请安装paramiko库: pip install paramiko"
+
+            print(f"📡 正在连接到 {host}:{port}...")
 
             # 创建SSH客户端
             ssh = paramiko.SSHClient()
@@ -365,12 +732,15 @@ class ServerMonitor:
                 if not password:
                     return False, "密码认证需要提供密码"
 
+                print(f"🔐 使用密码认证连接...")
                 ssh.connect(
                     hostname=host,
                     port=port,
                     username=username,
                     password=password,
-                    timeout=10
+                    timeout=30,  # 增加到30秒
+                    allow_agent=False,  # 禁用SSH代理
+                    look_for_keys=False  # 禁用自动查找密钥
                 )
             elif auth_type == 'key':
                 private_key_path = server_config.get('private_key_path')
@@ -378,6 +748,8 @@ class ServerMonitor:
 
                 if not private_key_path:
                     return False, "密钥认证需要提供私钥文件路径"
+
+                print(f"🔑 使用密钥认证连接: {private_key_path}")
 
                 # 尝试加载私钥
                 try:
@@ -389,39 +761,69 @@ class ServerMonitor:
                 except:
                     try:
                         private_key = paramiko.Ed25519Key.from_private_key_file(private_key_path, password=key_password)
-                    except:
-                        return False, f"无法加载私钥文件: {private_key_path}"
+                    except Exception as key_error:
+                        print(f"❌ 密钥加载失败: {key_error}")
+                        return False, f"无法加载私钥文件: {private_key_path} - {str(key_error)}"
 
                 ssh.connect(
                     hostname=host,
                     port=port,
                     username=username,
                     pkey=private_key,
-                    timeout=10
+                    timeout=30,  # 增加到30秒
+                    allow_agent=False,
+                    look_for_keys=False
                 )
             else:
                 return False, f"不支持的认证方式: {auth_type}"
 
+            print(f"✅ SSH连接建立成功")
+
             # 测试执行简单命令
-            stdin, stdout, stderr = ssh.exec_command('echo "connection test"')
+            print(f"🧪 测试命令执行...")
+            stdin, stdout, stderr = ssh.exec_command('echo "connection_test_$(date +%s)"', timeout=5)
+
+            # 读取输出和错误
             result = stdout.read().decode().strip()
+            error_output = stderr.read().decode().strip()
 
-            ssh.close()
+            print(f"📤 命令输出: '{result}'")
+            if error_output:
+                print(f"⚠️  错误输出: '{error_output}'")
 
-            if result == "connection test":
-                return True, "SSH连接测试成功"
+            # 验证命令执行结果
+            if result and "connection_test_" in result:
+                print(f"result的结果是: {result}")
+                print(f"✅ 命令执行成功")
+
+                # 额外测试：获取系统信息验证权限
+                stdin2, stdout2, stderr2 = ssh.exec_command('whoami && uname -s', timeout=5)
+                system_info = stdout2.read().decode().strip()
+                print(f"🖥️  系统信息: {system_info}")
+
+                ssh.close()
+                return True, f"SSH连接测试成功 - 用户: {system_info.split()[0] if system_info else username}"
             else:
-                return False, "SSH连接成功但命令执行失败"
+                ssh.close()
+                return False, f"SSH连接成功但命令执行失败 - 输出: '{result}'"
 
-        except paramiko.AuthenticationException:
-            return False, "SSH认证失败，请检查用户名和密码/密钥"
+        except paramiko.AuthenticationException as e:
+            print(f"❌ 认证失败: {e}")
+            return False, f"SSH认证失败，请检查用户名和密码/密钥 - {str(e)}"
         except paramiko.SSHException as e:
+            print(f"❌ SSH错误: {e}")
             return False, f"SSH连接错误: {str(e)}"
-        except socket.timeout:
-            return False, "连接超时，请检查主机地址和端口"
-        except socket.gaierror:
-            return False, "无法解析主机名，请检查主机地址"
+        except socket.timeout as e:
+            print(f"❌ 连接超时: {e}")
+            return False, f"连接超时，请检查主机地址和端口 - {str(e)}"
+        except socket.gaierror as e:
+            print(f"❌ 域名解析失败: {e}")
+            return False, f"无法解析主机名，请检查主机地址 - {str(e)}"
+        except ConnectionRefusedError as e:
+            print(f"❌ 连接被拒绝: {e}")
+            return False, f"连接被拒绝，请检查SSH服务是否运行和端口是否正确 - {str(e)}"
         except Exception as e:
+            print(f"❌ 未知错误: {e}")
             return False, f"连接失败: {str(e)}"
 
     def get_real_server_metrics(self, server_config):
@@ -436,7 +838,7 @@ class ServerMonitor:
             auth_type = server_config.get('auth_type', 'password')
 
             # 本地服务器使用psutil
-            if host in ['localhost', '127.0.0.1']:
+            if host in ['localhost', '127.0.0.1'] or auth_type == 'local':
                 return self._get_local_metrics()
 
             # 远程服务器使用SSH
@@ -450,7 +852,7 @@ class ServerMonitor:
                     port=port,
                     username=username,
                     password=server_config.get('password'),
-                    timeout=10
+                    timeout=30  # 增加到30秒
                 )
             else:  # key认证
                 private_key_path = server_config.get('private_key_path')
@@ -466,7 +868,7 @@ class ServerMonitor:
                     port=port,
                     username=username,
                     pkey=private_key,
-                    timeout=10
+                    timeout=30  # 增加到30秒
                 )
 
             # 获取系统信息
@@ -515,6 +917,21 @@ class ServerMonitor:
             except:
                 metrics['disk_free'] = 0.0
 
+            # 磁盘IO信息 - 使用iostat获取读写速度
+            stdin, stdout, stderr = ssh.exec_command("iostat -d 1 2 | tail -n +4 | grep -E '(vda|sda|nvme)' | tail -1 | awk '{print $3, $4}'")
+            disk_io_info = stdout.read().decode().strip().split()
+            try:
+                if len(disk_io_info) >= 2:
+                    # iostat输出的是kB/s，转换为字节/s
+                    metrics['disk_read'] = float(disk_io_info[0]) * 1024  # kB/s -> B/s
+                    metrics['disk_write'] = float(disk_io_info[1]) * 1024  # kB/s -> B/s
+                else:
+                    metrics['disk_read'] = 0.0
+                    metrics['disk_write'] = 0.0
+            except:
+                metrics['disk_read'] = 0.0
+                metrics['disk_write'] = 0.0
+
             # 网络信息（简化版）
             stdin, stdout, stderr = ssh.exec_command("cat /proc/net/dev | grep -E '(eth0|ens|enp)' | head -1 | awk '{print $2, $10}'")
             network_info = stdout.read().decode().strip().split()
@@ -554,6 +971,32 @@ class ServerMonitor:
             metrics['disk_percent'] = disk.percent
             metrics['disk_free'] = disk.free / (1024**3)  # GB
 
+            # 磁盘IO信息
+            disk_io = psutil.disk_io_counters()
+            if disk_io:
+                # 获取当前时间戳，计算IO速率
+                current_time = time.time()
+                if hasattr(self, '_last_disk_io') and hasattr(self, '_last_disk_time'):
+                    time_diff = current_time - self._last_disk_time
+                    if time_diff > 0:
+                        read_diff = disk_io.read_bytes - self._last_disk_io.read_bytes
+                        write_diff = disk_io.write_bytes - self._last_disk_io.write_bytes
+                        metrics['disk_read'] = read_diff / time_diff  # bytes/s
+                        metrics['disk_write'] = write_diff / time_diff  # bytes/s
+                    else:
+                        metrics['disk_read'] = 0.0
+                        metrics['disk_write'] = 0.0
+                else:
+                    metrics['disk_read'] = 0.0
+                    metrics['disk_write'] = 0.0
+
+                # 保存当前值用于下次计算
+                self._last_disk_io = disk_io
+                self._last_disk_time = current_time
+            else:
+                metrics['disk_read'] = 0.0
+                metrics['disk_write'] = 0.0
+
             # 网络信息
             network = psutil.net_io_counters()
             metrics['network_recv'] = network.bytes_recv
@@ -569,54 +1012,96 @@ class ServerMonitor:
             return None
 
     def get_server_metrics(self, server_id, time_range='1h'):
-        """获取服务器监控数据"""
+        """🚀 获取服务器监控数据（使用缓存优化）"""
         if server_id not in self.servers:
             return None
 
-        server_config = self.servers[server_id]
+        current_time = datetime.now()
+        cache_key = f"{server_id}_metrics_{time_range}"
 
-        # 只尝试获取真实数据，不使用模拟数据
+        print(f"🔍 查找缓存: {cache_key}")
+        print(f"📦 当前缓存键: {list(self.performance_cache.keys())}")
+
+        # 🔥 优先从缓存获取数据
+        if cache_key in self.performance_cache:
+            cache_data = self.performance_cache[cache_key]
+            cache_age = (current_time - cache_data['timestamp']).total_seconds()
+
+            if cache_age < self.cache_ttl:
+                print(f"⚡ 从缓存获取数据: {server_id} ({cache_age:.1f}s前)")
+
+                # 获取实时数据
+                realtime_cache_key = f"{server_id}_realtime"
+                current_metrics = None
+                if realtime_cache_key in self.performance_cache:
+                    current_metrics = self.performance_cache[realtime_cache_key]['data']
+
+                if not current_metrics:
+                    # 如果缓存中没有实时数据，快速获取
+                    server_config = self.servers[server_id]
+                    current_metrics = self.get_real_server_metrics(server_config)
+
+                if not current_metrics:
+                    return {
+                        'error': '无法连接到服务器或获取监控数据',
+                        'suggestion': '请检查服务器连接状态和配置'
+                    }
+
+                # 获取进程数据（也可以缓存）
+                processes = self._get_real_processes(self.servers[server_id])
+
+                return {
+                    'current': current_metrics,
+                    'historical': cache_data['data'],
+                    'processes': processes,
+                    'cache_info': {
+                        'cache_hit': True,
+                        'cache_age': f"{cache_age:.1f}s",
+                        'last_update': current_time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                }
+
+        # 🐌 缓存未命中，获取新数据（这种情况应该很少发生，因为后台线程在更新）
+        print(f"🔄 缓存未命中，获取新数据: {server_id}")
+
+        server_config = self.servers[server_id]
         real_metrics = self.get_real_server_metrics(server_config)
 
         if not real_metrics:
-            # 如果无法获取真实数据，返回错误信息
             return {
                 'error': '无法连接到服务器或获取监控数据',
                 'suggestion': '请检查服务器连接状态和配置'
             }
 
-        # 使用真实数据
-        current_metrics = real_metrics
+        # 获取历史数据（限制数据点）
+        historical_data = self._get_cached_historical_data(server_id, time_range, real_metrics)
 
-        # 生成历史数据（基于真实数据的趋势）
-        historical_data = self._generate_historical_data(time_range, current_metrics)
+        # 更新缓存
+        self.performance_cache[cache_key] = {
+            'data': historical_data,
+            'timestamp': current_time,
+            'ttl': self.cache_ttl
+        }
 
-        # 获取真实进程数据
+        # 获取进程数据
         processes = self._get_real_processes(server_config)
 
         return {
-            'current': current_metrics,
+            'current': real_metrics,
             'historical': historical_data,
-            'processes': processes
+            'processes': processes,
+            'cache_info': {
+                'cache_hit': False,
+                'last_update': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            }
         }
 
-    def _generate_mock_current_metrics(self):
-        """生成模拟的当前指标"""
-        return {
-            'cpu': round(np.random.uniform(20, 80), 1),
-            'load_avg': round(np.random.uniform(0.5, 3.0), 2),
-            'memory_percent': round(np.random.uniform(40, 85), 1),
-            'memory_used': round(np.random.uniform(3, 7), 1),
-            'memory_total': 8.0,
-            'disk_percent': round(np.random.uniform(30, 70), 1),
-            'disk_free': round(np.random.uniform(50, 200), 1),
-            'network_sent': int(np.random.uniform(1024*100, 1024*1000)),
-            'network_recv': int(np.random.uniform(1024*150, 1024*1500))
-        }
 
-    def _generate_historical_data(self, time_range, current_metrics):
-        """生成历史数据"""
+
+    def _generate_historical_data(self, time_range, current_metrics, limit_points=False):
+        """生成历史数据（带缓存机制和数据点限制）"""
         current_time = datetime.now()
+        server_key = f"default_{time_range}"  # 简化的服务器标识
 
         # 解析时间范围
         if time_range == '5m':
@@ -638,7 +1123,55 @@ class ServerMonitor:
             duration_minutes = 60
             interval_seconds = 60
 
-        # 生成时间序列
+        points = duration_minutes * 60 // interval_seconds
+
+        # 🚀 限制数据点数量
+        if limit_points and points > self.max_data_points:
+            points = self.max_data_points
+            interval_seconds = (duration_minutes * 60) // points
+            print(f"📊 限制数据点: {duration_minutes * 60 // interval_seconds} -> {points} 个点")
+
+        # 检查是否需要更新缓存
+        if (server_key not in self.historical_cache or
+            server_key not in self.last_update_time or
+            (current_time - self.last_update_time[server_key]).total_seconds() > interval_seconds):
+
+            print(f"🔄 更新历史数据缓存: {server_key}")
+
+            # 获取或初始化缓存
+            if server_key not in self.historical_cache:
+                self.historical_cache[server_key] = {
+                    'data_points': [],
+                    'max_points': points
+                }
+
+            cache = self.historical_cache[server_key]
+
+            # 添加新的数据点（当前实时数据）
+            new_data_point = {
+                'timestamp': current_time,
+                'cpu': current_metrics.get('cpu', 0),
+                'memory': current_metrics.get('memory_percent', 0),
+                'disk_read': current_metrics.get('disk_read', 0),
+                'disk_write': current_metrics.get('disk_write', 0),
+                'network_sent': current_metrics.get('network_sent', 0),
+                'network_recv': current_metrics.get('network_recv', 0)
+            }
+
+            cache['data_points'].append(new_data_point)
+
+            # 保持数据点数量不超过限制
+            if len(cache['data_points']) > points:
+                cache['data_points'] = cache['data_points'][-points:]
+
+            # 不再填充模拟数据，只使用真实的监控数据
+            # 如果数据点不够，就显示现有的真实数据点
+            print(f"📊 当前真实数据点数量: {len(cache['data_points'])}, 请求数量: {points}")
+
+            self.last_update_time[server_key] = current_time
+
+        # 从缓存构建返回数据
+        cache = self.historical_cache[server_key]
         timestamps = []
         cpu_data = []
         memory_data = []
@@ -647,91 +1180,33 @@ class ServerMonitor:
         network_sent_data = []
         network_recv_data = []
 
-        points = duration_minutes * 60 // interval_seconds
+        for point in cache['data_points'][-points:]:  # 取最新的points个数据点
+            timestamps.append(point['timestamp'].strftime('%H:%M:%S'))
+            cpu_data.append(round(point['cpu'], 1))
+            memory_data.append(round(point['memory'], 1))
+            disk_read_data.append(int(point['disk_read']))
+            disk_write_data.append(int(point['disk_write']))
+            network_sent_data.append(int(point['network_sent']))
+            network_recv_data.append(int(point['network_recv']))
 
-        # 基于当前指标生成历史数据
-        base_cpu = current_metrics.get('cpu', 50)
-        base_memory = current_metrics.get('memory_percent', 60)
+        print(f"📊 返回历史数据: {len(cpu_data)}个数据点, CPU范围: {min(cpu_data):.1f}-{max(cpu_data):.1f}%")
 
-        for i in range(points):
-            timestamp = current_time - timedelta(seconds=(points - i - 1) * interval_seconds)
-            timestamps.append(timestamp.strftime('%H:%M:%S'))
-
-            # 基于当前值生成历史数据（带波动）
-            cpu_val = base_cpu + 10 * np.sin(i * 0.1) + np.random.normal(0, 5)
-            cpu_data.append(max(0, min(100, cpu_val)))
-
-            memory_val = base_memory + 5 * np.sin(i * 0.05) + np.random.normal(0, 3)
-            memory_data.append(max(0, min(100, memory_val)))
-
-            disk_read_data.append(max(0, 1024 * 1024 * (5 + np.random.normal(0, 2))))
-            disk_write_data.append(max(0, 1024 * 1024 * (3 + np.random.normal(0, 1))))
-
-            network_sent_data.append(max(0, 1024 * (100 + np.random.normal(0, 20))))
-            network_recv_data.append(max(0, 1024 * (150 + np.random.normal(0, 30))))
-
-        # 历史数据
-        return {
+        result = {
             'timestamps': timestamps,
-            'cpu': [round(x, 1) for x in cpu_data],
-            'memory': [round(x, 1) for x in memory_data],
-            'disk_read': [int(x) for x in disk_read_data],
-            'disk_write': [int(x) for x in disk_write_data],
-            'network_sent': [int(x) for x in network_sent_data],
-            'network_recv': [int(x) for x in network_recv_data]
+            'cpu': cpu_data,
+            'memory': memory_data,
+            'disk_read': disk_read_data,
+            'disk_write': disk_write_data,
+            'network_sent': network_sent_data,
+            'network_recv': network_recv_data
         }
 
-    def _generate_mock_processes(self):
-        """生成模拟进程数据"""
-        processes = [
-            {
-                'pid': 1234,
-                'name': 'python3',
-                'cpu_percent': round(np.random.uniform(5, 25), 1),
-                'memory_percent': round(np.random.uniform(2, 8), 1),
-                'memory_mb': round(np.random.uniform(100, 500), 1),
-                'status': 'running',
-                'create_time': '2025-07-20 10:30:15'
-            },
-            {
-                'pid': 5678,
-                'name': 'nginx',
-                'cpu_percent': round(np.random.uniform(1, 5), 1),
-                'memory_percent': round(np.random.uniform(1, 3), 1),
-                'memory_mb': round(np.random.uniform(50, 150), 1),
-                'status': 'running',
-                'create_time': '2025-07-20 09:15:30'
-            },
-            {
-                'pid': 9012,
-                'name': 'mysql',
-                'cpu_percent': round(np.random.uniform(2, 15), 1),
-                'memory_percent': round(np.random.uniform(5, 15), 1),
-                'memory_mb': round(np.random.uniform(200, 800), 1),
-                'status': 'running',
-                'create_time': '2025-07-20 08:45:00'
-            },
-            {
-                'pid': 3456,
-                'name': 'redis-server',
-                'cpu_percent': round(np.random.uniform(0.5, 3), 1),
-                'memory_percent': round(np.random.uniform(1, 5), 1),
-                'memory_mb': round(np.random.uniform(30, 100), 1),
-                'status': 'running',
-                'create_time': '2025-07-20 08:30:45'
-            },
-            {
-                'pid': 7890,
-                'name': 'java',
-                'cpu_percent': round(np.random.uniform(10, 30), 1),
-                'memory_percent': round(np.random.uniform(8, 20), 1),
-                'memory_mb': round(np.random.uniform(500, 1500), 1),
-                'status': 'running',
-                'create_time': '2025-07-20 09:00:20'
-            }
-        ]
+        # 保存历史数据到文件
+        self.persistence.save_historical_data('default', result)
 
-        return sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)
+        return result
+
+
 
     def _get_real_processes(self, server_config):
         """获取真实进程数据"""
@@ -759,7 +1234,7 @@ class ServerMonitor:
                     port=port,
                     username=username,
                     password=server_config.get('password'),
-                    timeout=10
+                    timeout=30  # 增加到30秒
                 )
             else:  # key认证
                 private_key_path = server_config.get('private_key_path')
@@ -775,21 +1250,29 @@ class ServerMonitor:
                     port=port,
                     username=username,
                     pkey=private_key,
-                    timeout=10
+                    timeout=30  # 增加到30秒
                 )
 
             # 获取进程信息 - 按CPU使用率排序的前10个进程
             cmd = "ps aux --sort=-%cpu | head -11 | tail -10 | awk '{print $2,$11,$3,$4,$8}'"
+            print(f"🔍 执行进程查询命令: {cmd}")
             stdin, stdout, stderr = ssh.exec_command(cmd)
             process_lines = stdout.read().decode().strip().split('\n')
+            error_output = stderr.read().decode().strip()
+
+            print(f"📊 进程命令输出行数: {len(process_lines)}")
+            print(f"📊 进程原始输出: {process_lines}")
+            if error_output:
+                print(f"⚠️ 进程命令错误输出: {error_output}")
 
             processes = []
-            for line in process_lines:
+            for i, line in enumerate(process_lines):
                 if line.strip():
                     parts = line.strip().split(None, 4)
+                    print(f"📋 解析第{i+1}行: '{line}' -> 分割为 {len(parts)} 部分: {parts}")
                     if len(parts) >= 5:
                         try:
-                            processes.append({
+                            process_data = {
                                 'pid': int(parts[0]),
                                 'name': parts[1].split('/')[-1][:20],  # 只取程序名，限制长度
                                 'cpu_percent': float(parts[2]),
@@ -797,8 +1280,11 @@ class ServerMonitor:
                                 'memory_mb': round(float(parts[3]) * 8 * 1024 / 100, 1),  # 估算内存MB
                                 'status': parts[4] if len(parts) > 4 else 'running',
                                 'create_time': 'N/A'
-                            })
-                        except (ValueError, IndexError):
+                            }
+                            processes.append(process_data)
+                            print(f"✅ 成功解析进程: {process_data}")
+                        except (ValueError, IndexError) as e:
+                            print(f"❌ 解析进程失败: {e}, 行内容: '{line}'")
                             continue
 
             ssh.close()
@@ -810,38 +1296,54 @@ class ServerMonitor:
 
     def _get_local_processes(self):
         """获取本地进程数据"""
+        print("🔍 开始获取本地进程数据...")
         try:
             import psutil
 
             processes = []
-            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'memory_info', 'status', 'create_time']):
+            all_processes = list(psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'memory_info', 'status', 'create_time']))
+            print(f"📊 系统总进程数: {len(all_processes)}")
+
+            for proc in all_processes:
                 try:
                     pinfo = proc.info
-                    if pinfo['cpu_percent'] is not None and pinfo['cpu_percent'] > 0:
-                        processes.append({
+                    # 移除CPU使用率>0的限制，获取所有进程
+                    if pinfo['cpu_percent'] is not None:
+                        process_data = {
                             'pid': pinfo['pid'],
-                            'name': pinfo['name'][:20],
+                            'name': pinfo['name'][:20] if pinfo['name'] else 'Unknown',
                             'cpu_percent': round(pinfo['cpu_percent'], 1),
-                            'memory_percent': round(pinfo['memory_percent'], 1),
+                            'memory_percent': round(pinfo['memory_percent'], 1) if pinfo['memory_percent'] else 0,
                             'memory_mb': round(pinfo['memory_info'].rss / 1024 / 1024, 1) if pinfo['memory_info'] else 0,
-                            'status': pinfo['status'],
+                            'status': pinfo['status'] if pinfo['status'] else 'unknown',
                             'create_time': datetime.fromtimestamp(pinfo['create_time']).strftime('%Y-%m-%d %H:%M:%S') if pinfo['create_time'] else 'N/A'
-                        })
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        }
+                        processes.append(process_data)
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                    print(f"⚠️ 无法访问进程: {e}")
                     continue
 
+            print(f"📊 成功获取进程数: {len(processes)}")
+
             # 按CPU使用率排序，返回前10个
-            return sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)[:10]
+            sorted_processes = sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)[:10]
+            print(f"📊 返回前10个进程:")
+            for i, proc in enumerate(sorted_processes):
+                print(f"  {i+1}. PID:{proc['pid']} {proc['name']} CPU:{proc['cpu_percent']}% MEM:{proc['memory_percent']}%")
+
+            return sorted_processes
 
         except ImportError:
-            print("psutil库未安装，无法获取本地进程数据")
+            print("❌ psutil库未安装，无法获取本地进程数据")
             return []
         except Exception as e:
-            print(f"获取本地进程数据失败: {e}")
+            print(f"❌ 获取本地进程数据失败: {e}")
             return []
 
 # 创建服务器监控实例
 server_monitor = ServerMonitor()
+
+# 不添加任何默认服务器配置，只使用用户真实添加的服务器
 
 @app.route('/api/analyze-monitoring-data', methods=['POST'])
 def analyze_monitoring_data_api():
@@ -1003,13 +1505,15 @@ def test_server_connection(server_id=None):
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/servers/<server_id>/metrics', methods=['GET'])
-def get_server_metrics(server_id):
-    """获取服务器监控数据"""
+def get_server_metrics_api(server_id):
+    """获取服务器监控数据API"""
     try:
         if server_id not in server_monitor.servers:
             return jsonify({'success': False, 'error': '服务器不存在'})
 
         time_range = request.args.get('timeRange', '1h')
+        print(f"🔍 API请求: {server_id}, 时间范围: {time_range}")
+
         metrics_data = server_monitor.get_server_metrics(server_id, time_range)
 
         if metrics_data and 'error' not in metrics_data:
@@ -1026,6 +1530,7 @@ def get_server_metrics(server_id):
         else:
             return jsonify({'success': False, 'error': '无法连接到服务器获取监控数据'})
     except Exception as e:
+        print(f"❌ API错误: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/servers/<server_id>/metrics/realtime', methods=['GET'])
